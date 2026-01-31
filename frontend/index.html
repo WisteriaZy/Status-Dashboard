@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Device Status Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .tab-btn.active {
+            border-bottom: 2px solid #3b82f6;
+            color: #3b82f6;
+        }
+        #login-page { display: none; }
+        #main-page { display: none; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- 登录页 -->
+    <div id="login-page" class="min-h-screen flex items-center justify-center">
+        <div class="bg-white rounded-lg shadow-lg p-8 w-full max-w-sm">
+            <h1 class="text-2xl font-bold text-center mb-6">身份验证</h1>
+            <p class="text-gray-500 text-sm text-center mb-6">请输入验证器中的 6 位验证码</p>
+            <div class="space-y-4">
+                <input type="text" id="totp-code" maxlength="6" pattern="[0-9]*" inputmode="numeric"
+                    class="w-full text-center text-2xl tracking-widest py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    placeholder="000000" autocomplete="one-time-code">
+                <button onclick="submitTotp()" id="login-btn"
+                    class="w-full py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium">
+                    验证
+                </button>
+                <p id="login-error" class="text-red-500 text-sm text-center hidden"></p>
+            </div>
+            <p class="text-gray-400 text-xs text-center mt-6">首次使用请扫描 config/totp_qrcode.png</p>
+        </div>
+    </div>
+
+    <!-- 主页面 -->
+    <div id="main-page">
+        <!-- 顶部导航 -->
+        <nav class="bg-white shadow-sm">
+            <div class="max-w-6xl mx-auto px-4">
+                <div class="flex space-x-8">
+                    <button class="tab-btn active py-4 px-1 font-medium text-gray-700 hover:text-blue-500" data-tab="current">
+                        当前
+                    </button>
+                    <button class="tab-btn py-4 px-1 font-medium text-gray-500 hover:text-blue-500" data-tab="tasks">
+                        任务列表
+                    </button>
+                    <button class="tab-btn py-4 px-1 font-medium text-gray-500 hover:text-blue-500" data-tab="stats">
+                        数据可视化
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 内容区域 -->
+        <main class="max-w-6xl mx-auto px-4 py-6 pb-16">
+            <!-- 当前 -->
+            <div id="tab-current" class="tab-content active">
+                <div class="flex flex-col lg:flex-row lg:gap-4">
+                    <!-- 左栏：当前应用 & 打开应用 -->
+                    <div class="lg:w-1/2 space-y-4">
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <div id="current-app-info" class="text-gray-600">加载中...</div>
+                        </div>
+                        <!-- 正在播放 -->
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <div id="media-info" class="text-gray-600"></div>
+                        </div>
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <div id="open-apps-info" class="text-gray-600"></div>
+                        </div>
+                    </div>
+
+                    <!-- 右栏：系统信息 & 截图 -->
+                    <div class="lg:w-1/2 space-y-4 mt-4 lg:mt-0">
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <div id="device-info" class="text-gray-600"></div>
+                        </div>
+                        <!-- 移动设备 -->
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <div id="mobile-devices-info" class="text-gray-600"></div>
+                        </div>
+                        <!-- 截图区域 -->
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <div class="flex items-center justify-between mb-4">
+                                <h2 class="text-sm text-gray-500">屏幕截图</h2>
+                                <button id="screenshot-btn" onclick="takeScreenshot()" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm">
+                                    截图
+                                </button>
+                            </div>
+                            <div id="screenshot-container" class="text-gray-500 text-sm">
+                                点击按钮获取当前屏幕截图
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 任务列表 -->
+            <div id="tab-tasks" class="tab-content">
+                <!-- 未连接状态 -->
+                <div id="todo-not-connected" class="bg-white rounded-lg shadow p-6 text-center">
+                    <h2 class="text-xl font-semibold mb-4">任务列表</h2>
+                    <p class="text-gray-500 mb-4">连接 Google Tasks 以管理你的任务</p>
+                    <a href="/api/todo/connect" class="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                        连接 Google Tasks
+                    </a>
+                </div>
+
+                <!-- 已连接状态 -->
+                <div id="todo-connected" class="space-y-4" style="display:none">
+                    <!-- 列表选择 & 添加 -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <div class="flex items-center gap-4 mb-4">
+                            <select id="tasklist-select" onchange="loadTasks()" class="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                                <option value="@default">加载中...</option>
+                            </select>
+                            <button onclick="refreshTasks()" class="px-3 py-2 text-gray-500 hover:text-blue-500 text-sm">刷新</button>
+                        </div>
+                        <div class="flex gap-2">
+                            <input type="text" id="new-task-input" placeholder="添加新任务..."
+                                class="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                onkeypress="if(event.key==='Enter')addTask()">
+                            <button onclick="addTask()" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm">
+                                添加
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 任务列表 -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <div id="tasks-container" class="text-gray-600">
+                            加载中...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 数据可视化 -->
+            <div id="tab-stats" class="tab-content">
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-xl font-semibold mb-4">数据可视化</h2>
+                    <p class="text-gray-500">统计图表（待开发）</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- 底部状态栏 -->
+        <footer class="fixed bottom-0 left-0 right-0 bg-white border-t px-4 py-2">
+            <div class="max-w-6xl mx-auto flex justify-between text-sm text-gray-500">
+                <span id="connection-status">● 已连接</span>
+                <span id="last-update">最后更新: --</span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        let refreshInterval = null;
+
+        // 检查认证状态
+        async function checkAuth() {
+            try {
+                const res = await fetch('/api/auth/status');
+                const data = await res.json();
+                return data.authenticated;
+            } catch {
+                return false;
+            }
+        }
+
+        // 显示登录页或主页
+        async function initApp() {
+            const authenticated = await checkAuth();
+            if (authenticated) {
+                showMainPage();
+            } else {
+                showLoginPage();
+            }
+        }
+
+        function showLoginPage() {
+            document.getElementById('login-page').style.display = 'flex';
+            document.getElementById('main-page').style.display = 'none';
+            document.getElementById('totp-code').focus();
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+
+        function showMainPage() {
+            document.getElementById('login-page').style.display = 'none';
+            document.getElementById('main-page').style.display = 'block';
+            fetchStatus();
+            refreshInterval = setInterval(fetchStatus, 5000);
+            checkTodoConnection();
+        }
+
+        // 提交验证码
+        async function submitTotp() {
+            const code = document.getElementById('totp-code').value.trim();
+            const errorEl = document.getElementById('login-error');
+            const btn = document.getElementById('login-btn');
+
+            if (!/^\d{6}$/.test(code)) {
+                errorEl.textContent = '请输入 6 位数字验证码';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = '验证中...';
+            errorEl.classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/auth/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code }),
+                });
+
+                if (res.ok) {
+                    showMainPage();
+                } else {
+                    const data = await res.json();
+                    errorEl.textContent = data.detail || '验证失败';
+                    errorEl.classList.remove('hidden');
+                }
+            } catch (e) {
+                errorEl.textContent = '网络错误';
+                errorEl.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '验证';
+            }
+        }
+
+        // 回车提交
+        document.getElementById('totp-code').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') submitTotp();
+        });
+
+        // 标签页切换逻辑
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+            });
+        });
+
+        // 获取状态数据
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+
+                // 未认证则跳转登录
+                if (res.status === 401) {
+                    showLoginPage();
+                    return;
+                }
+
+                const data = await res.json();
+
+                // 左栏：当前应用
+                document.getElementById('current-app-info').innerHTML = `
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <div class="text-sm text-gray-500 mb-1">当前应用</div>
+                        <div class="text-2xl font-semibold">${data.current_app.name}</div>
+                        <div class="text-gray-600 mt-1 truncate" title="${data.current_app.title}">
+                            ${data.current_app.title || '(无标题)'}
+                        </div>
+                        <div class="text-xs text-gray-400 mt-1">
+                            ${data.current_app.process_name} (PID: ${data.current_app.pid})
+                        </div>
+                    </div>
+                `;
+
+                // 左栏：正在播放（SMTC）
+                const media = data.media;
+                if (media.available) {
+                    const statusText = {
+                        'playing': '播放中',
+                        'paused': '已暂停',
+                        'stopped': '已停止',
+                    }[media.playback_status] || media.playback_status;
+
+                    document.getElementById('media-info').innerHTML = `
+                        <div class="text-sm text-gray-500 mb-2">正在播放</div>
+                        <div class="flex gap-4">
+                            ${media.thumbnail ? `<img src="${media.thumbnail}" alt="封面" class="w-16 h-16 rounded object-cover flex-shrink-0">` : ''}
+                            <div class="flex-1 min-w-0">
+                                <div class="font-semibold truncate" title="${media.title}">${media.title}</div>
+                                <div class="text-sm text-gray-600 truncate">${media.artist}</div>
+                                <div class="text-xs text-gray-400 truncate">${media.album}</div>
+                                <div class="text-xs mt-1">
+                                    <span class="${media.playback_status === 'playing' ? 'text-green-500' : 'text-gray-400'}">${statusText}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('media-info').innerHTML = `
+                        <div class="text-sm text-gray-500 mb-2">正在播放</div>
+                        <div class="text-gray-400 text-sm">暂无媒体播放</div>
+                    `;
+                }
+
+                // 左栏：打开的应用
+                const appsHtml = data.open_apps.map(app => `
+                    <div class="flex items-center py-2 px-3 hover:bg-gray-100 rounded ${app.pid === data.current_app.pid ? 'bg-blue-50 border-l-2 border-blue-500' : ''}">
+                        <div class="flex-1 min-w-0">
+                            <div class="font-medium text-sm">${app.app_name}</div>
+                            <div class="text-xs text-gray-500 truncate" title="${app.title}">${app.title}</div>
+                        </div>
+                    </div>
+                `).join('');
+
+                document.getElementById('open-apps-info').innerHTML = `
+                    <div class="text-sm text-gray-500 mb-2">打开的应用 (${data.open_apps.length})</div>
+                    <div class="space-y-1 max-h-96 overflow-y-auto">
+                        ${appsHtml || '<div class="text-gray-400 text-sm">无打开的应用</div>'}
+                    </div>
+                `;
+
+                // 右栏：设备信息
+                const disksHtml = data.device.disks.map(disk => `
+                    <div class="bg-white rounded p-3">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="font-medium text-sm">${disk.device}</span>
+                            <span class="text-xs text-gray-500">${disk.fstype}</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2 mb-1">
+                            <div class="h-2 rounded-full ${disk.percent > 90 ? 'bg-red-500' : disk.percent > 70 ? 'bg-yellow-500' : 'bg-blue-500'}" style="width: ${disk.percent}%"></div>
+                        </div>
+                        <div class="text-xs text-gray-500">
+                            ${disk.used_gb} / ${disk.total_gb} GB (${disk.percent}%)
+                        </div>
+                    </div>
+                `).join('');
+
+                document.getElementById('device-info').innerHTML = `
+                    <div class="space-y-4">
+                        <div class="text-sm text-gray-500 mb-2">系统信息</div>
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                                <div class="text-sm text-gray-500">CPU</div>
+                                <div class="text-xl font-semibold">${data.device.cpu_percent}%</div>
+                            </div>
+                            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                                <div class="text-sm text-gray-500">内存</div>
+                                <div class="text-xl font-semibold">${data.device.memory_percent}%</div>
+                                <div class="text-xs text-gray-400">${data.device.memory_used_gb}/${data.device.memory_total_gb} GB</div>
+                            </div>
+                            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                                <div class="text-sm text-gray-500">运行时间</div>
+                                <div class="text-xl font-semibold">${data.device.uptime_formatted}</div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="text-sm text-gray-500 mb-2">磁盘</div>
+                            <div class="grid grid-cols-2 gap-2">
+                                ${disksHtml || '<div class="text-gray-400 text-sm">无磁盘信息</div>'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                document.getElementById('last-update').textContent =
+                    '最后更新: ' + new Date().toLocaleTimeString();
+                document.getElementById('connection-status').innerHTML =
+                    '<span class="text-green-500">●</span> 已连接';
+
+                // 获取移动设备状态
+                fetchMobileDevices();
+            } catch (e) {
+                document.getElementById('connection-status').innerHTML =
+                    '<span class="text-red-500">●</span> 连接失败';
+            }
+        }
+
+        // 获取移动设备状态
+        async function fetchMobileDevices() {
+            try {
+                const res = await fetch('/api/devices');
+                if (!res.ok) return;
+
+                const data = await res.json();
+                const container = document.getElementById('mobile-devices-info');
+
+                if (data.devices.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-sm text-gray-500 mb-2">移动设备</div>
+                        <div class="text-gray-400 text-sm">暂无设备连接</div>
+                    `;
+                    return;
+                }
+
+                const devicesHtml = data.devices.map(d => {
+                    const statusColor = d.online ? (d.using ? 'text-green-500' : 'text-yellow-500') : 'text-gray-400';
+                    const statusText = d.online ? (d.using ? '使用中' : '待机') : '离线';
+                    const batteryIcon = d.charging ? '⚡' : '🔋';
+                    const batteryText = d.battery !== null ? `${batteryIcon} ${d.battery}%` : '';
+
+                    return `
+                        <div class="bg-gray-50 rounded-lg p-3">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <div class="font-medium">${d.show_name}</div>
+                                    <div class="text-sm text-gray-600 truncate">${d.using ? d.app_name : '未在使用'}</div>
+                                </div>
+                                <div class="text-right text-xs">
+                                    <div class="${statusColor}">${statusText}</div>
+                                    ${batteryText ? `<div class="text-gray-500 mt-1">${batteryText}</div>` : ''}
+                                </div>
+                            </div>
+                            <div class="text-xs text-gray-400 mt-2">更新于 ${d.last_update}</div>
+                        </div>
+                    `;
+                }).join('');
+
+                container.innerHTML = `
+                    <div class="text-sm text-gray-500 mb-2">移动设备 (${data.devices.length})</div>
+                    <div class="space-y-2">${devicesHtml}</div>
+                `;
+            } catch {}
+        }
+
+        // 截图功能
+        async function takeScreenshot() {
+            const btn = document.getElementById('screenshot-btn');
+            const container = document.getElementById('screenshot-container');
+
+            btn.disabled = true;
+            btn.textContent = '截图中...';
+            container.innerHTML = '<div class="text-gray-400">正在获取截图...</div>';
+
+            try {
+                const res = await fetch('/api/screenshot', { method: 'POST' });
+
+                if (res.status === 401) {
+                    showLoginPage();
+                    return;
+                }
+
+                const data = await res.json();
+
+                if (data.success) {
+                    container.innerHTML = `
+                        <div class="space-y-2">
+                            <div class="text-xs text-gray-400">
+                                ${data.timestamp} · ${data.width}x${data.height}
+                            </div>
+                            <img src="${data.base64}" alt="截图" class="w-full rounded-lg border cursor-pointer hover:opacity-90" onclick="window.open(this.src, '_blank')">
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = `<div class="text-red-500">截图失败: ${data.error}</div>`;
+                }
+            } catch (e) {
+                container.innerHTML = `<div class="text-red-500">请求失败: ${e.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '截图';
+            }
+        }
+
+        // 启动应用
+        initApp();
+
+        // ========== Google Tasks ==========
+
+        async function checkTodoConnection() {
+            try {
+                const res = await fetch('/api/todo/status');
+                if (res.status === 401) return;
+                const data = await res.json();
+                if (data.connected) {
+                    document.getElementById('todo-not-connected').style.display = 'none';
+                    document.getElementById('todo-connected').style.display = 'block';
+                    await loadTaskLists();
+                }
+            } catch {}
+        }
+
+        async function loadTaskLists() {
+            try {
+                const res = await fetch('/api/todo/lists');
+                const data = await res.json();
+                const select = document.getElementById('tasklist-select');
+                select.innerHTML = data.lists.map(l =>
+                    `<option value="${l.id}">${l.title}</option>`
+                ).join('');
+                await loadTasks();
+            } catch {}
+        }
+
+        async function loadTasks() {
+            const listId = document.getElementById('tasklist-select').value;
+            const container = document.getElementById('tasks-container');
+
+            try {
+                const res = await fetch(`/api/todo/tasks?tasklist_id=${encodeURIComponent(listId)}`);
+                const data = await res.json();
+
+                if (data.tasks.length === 0) {
+                    container.innerHTML = '<div class="text-gray-400 text-sm text-center py-4">没有待办任务</div>';
+                    return;
+                }
+
+                container.innerHTML = data.tasks.map(task => `
+                    <div class="flex items-start gap-3 py-3 border-b last:border-0 group">
+                        <button onclick="completeTask('${task.id}')" class="mt-1 w-5 h-5 rounded-full border-2 border-gray-300 hover:border-green-500 hover:bg-green-50 flex-shrink-0 transition-colors" title="完成"></button>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm">${task.title}</div>
+                            ${task.notes ? `<div class="text-xs text-gray-400 mt-1">${task.notes}</div>` : ''}
+                            ${task.due ? `<div class="text-xs text-gray-400 mt-1">${task.due.split('T')[0]}</div>` : ''}
+                        </div>
+                        <button onclick="deleteTask('${task.id}')" class="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity text-sm" title="删除">✕</button>
+                    </div>
+                `).join('');
+            } catch (e) {
+                container.innerHTML = `<div class="text-red-500 text-sm">加载失败</div>`;
+            }
+        }
+
+        function refreshTasks() { loadTasks(); }
+
+        async function addTask() {
+            const input = document.getElementById('new-task-input');
+            const title = input.value.trim();
+            if (!title) return;
+
+            const listId = document.getElementById('tasklist-select').value;
+
+            try {
+                await fetch('/api/todo/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, tasklist_id: listId }),
+                });
+                input.value = '';
+                await loadTasks();
+            } catch {}
+        }
+
+        async function completeTask(taskId) {
+            const listId = document.getElementById('tasklist-select').value;
+            try {
+                await fetch(`/api/todo/tasks/${taskId}/complete?tasklist_id=${encodeURIComponent(listId)}`, { method: 'POST' });
+                await loadTasks();
+            } catch {}
+        }
+
+        async function deleteTask(taskId) {
+            const listId = document.getElementById('tasklist-select').value;
+            try {
+                await fetch(`/api/todo/tasks/${taskId}?tasklist_id=${encodeURIComponent(listId)}`, { method: 'DELETE' });
+                await loadTasks();
+            } catch {}
+        }
+    </script>
+</body>
+</html>
