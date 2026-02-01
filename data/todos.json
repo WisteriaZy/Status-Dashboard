@@ -1,40 +1,4 @@
 {
-  "todos": [
-    {
-      "id": "9f146476",
-      "title": "修改代码",
-      "notes": "",
-      "completed": true,
-      "important": false,
-      "parent_id": null,
-      "remind": {
-        "at": "2026-01-31T22:10:00",
-        "type": "once"
-      },
-      "remind_tag": "私人",
-      "last_reminded_at": "2026-01-31T22:10:26.138309",
-      "created_at": "2026-01-31T21:47:50.747798",
-      "updated_at": "2026-02-01T13:42:54.350606",
-      "reminded": true,
-      "completed_at": "2026-02-01T13:42:54.349596"
-    },
-    {
-      "id": "862aef09",
-      "title": "维护",
-      "notes": "",
-      "completed": true,
-      "important": false,
-      "parent_id": null,
-      "remind": {
-        "at": "2026-02-01T14:50:00",
-        "type": "once"
-      },
-      "remind_tag": "私人",
-      "last_reminded_at": "2026-02-01T14:50:10.441486",
-      "created_at": "2026-02-01T14:48:25.369612",
-      "updated_at": "2026-02-01T14:50:40.389646",
-      "completed_at": "2026-02-01T14:50:40.388551"
-    }
-  ],
+  "todos": [],
   "version": 1
 }

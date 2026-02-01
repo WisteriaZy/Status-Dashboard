@@ -1,0 +1,27 @@
+/* 公共样式 */
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.tab-btn.active {
+    border-bottom: 2px solid #3b82f6;
+    color: #3b82f6;
+}
+#login-page { display: none; }
+#main-page { display: none; }
+.remind-panel { display: none; }
+.remind-panel.active { display: block; }
+.hour-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.hour-btn, .weekday-btn, .day-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.hour-btn:hover, .weekday-btn:hover, .day-btn:hover { background: #e5e7eb; }
+.hour-btn.selected, .weekday-btn.selected, .day-btn.selected {
+    background: #3b82f6;
+    color: white;
+    border-color: #3b82f6;
+}
+.day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }

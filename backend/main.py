@@ -10,22 +10,25 @@ from pydantic import BaseModel
 from pathlib import Path
 from typing import Optional
 
-from window_tracker import get_active_window_info, get_open_apps
+from window_tracker import get_active_window_info, get_open_apps, get_app_name
 from device_info import get_device_info, format_uptime
 from screenshot import take_screenshot
 from media_info import get_media_info
 from auth import verify_totp, generate_device_token, register_verified_token, is_token_valid, TOKEN_VALID_DAYS
 import local_todo
 import mobile_device
+import app_usage
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时：启动提醒检查器
+    # 启动时
     local_todo.start_reminder_checker()
+    app_usage.start_tracker()
     yield
-    # 关闭时：停止提醒检查器
+    # 关闭时
     local_todo.stop_reminder_checker()
+    app_usage.stop_tracker()
 
 
 app = FastAPI(title="Local Device Status Dashboard", version="0.1.0", lifespan=lifespan)
@@ -128,12 +131,30 @@ def get_status(auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME))
     open_apps = get_open_apps()
     media = get_media_info()
 
+    # 获取今日使用时间
+    today_usage = app_usage.get_today_usage()
+
+    # 为每个应用添加使用时间
+    for app_item in open_apps:
+        process_name = app_item.get("process_name", "")
+        usage_seconds = today_usage.get(process_name, 0)
+        app_item["usage_seconds"] = usage_seconds
+        app_item["usage_formatted"] = app_usage.format_duration(usage_seconds)
+
+    # 按使用时间排序（降序）
+    open_apps.sort(key=lambda x: x.get("usage_seconds", 0), reverse=True)
+
+    # 当前应用的使用时间
+    current_usage = today_usage.get(window["process_name"], 0)
+
     return {
         "current_app": {
             "process_name": window["process_name"],
             "name": window["app_name"],
             "title": window["title"],
             "pid": window["pid"],
+            "usage_seconds": current_usage,
+            "usage_formatted": app_usage.format_duration(current_usage),
         },
         "open_apps": open_apps,
         "media": media,
@@ -157,6 +178,125 @@ def capture_screenshot(auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKI
 
     result = take_screenshot(save_to_file=False)
     return result
+
+
+# ========== 应用使用时间统计 ==========
+
+@app.get("/api/usage/today")
+def get_usage_today(auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME)):
+    """获取今日应用使用时间统计"""
+    if not check_auth(auth_token):
+        raise HTTPException(status_code=401, detail="未认证")
+
+    usage = app_usage.get_today_usage()
+
+    # 转换为列表并按使用时间排序
+    apps = []
+    for process_name, seconds in usage.items():
+        apps.append({
+            "process_name": process_name,
+            "app_name": get_app_name(process_name),
+            "seconds": seconds,
+            "formatted": app_usage.format_duration(seconds),
+        })
+
+    apps.sort(key=lambda x: x["seconds"], reverse=True)
+
+    # 计算总时间
+    total_seconds = sum(usage.values())
+
+    return {
+        "date": app_usage._get_today_str(),
+        "total_seconds": total_seconds,
+        "total_formatted": app_usage.format_duration(total_seconds),
+        "apps": apps,
+    }
+
+
+@app.get("/api/usage/dates")
+def get_usage_dates(auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME)):
+    """获取有统计数据的日期列表"""
+    if not check_auth(auth_token):
+        raise HTTPException(status_code=401, detail="未认证")
+
+    return {"dates": app_usage.get_available_dates()}
+
+
+@app.get("/api/usage/week/summary")
+def get_usage_week_summary(auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME)):
+    """获取最近 7 天的使用统计摘要"""
+    if not check_auth(auth_token):
+        raise HTTPException(status_code=401, detail="未认证")
+
+    summary = app_usage.get_week_summary()
+
+    # 为应用添加 app_name
+    for app_item in summary["apps"]:
+        app_item["app_name"] = get_app_name(app_item["process_name"])
+
+    return summary
+
+
+@app.get("/api/usage/month/summary")
+def get_usage_month_summary(auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME)):
+    """获取最近 30 天的使用统计摘要"""
+    if not check_auth(auth_token):
+        raise HTTPException(status_code=401, detail="未认证")
+
+    summary = app_usage.get_month_summary()
+
+    # 为应用添加 app_name
+    for app_item in summary["apps"]:
+        app_item["app_name"] = get_app_name(app_item["process_name"])
+
+    return summary
+
+
+@app.get("/api/usage/app/{process_name}")
+def get_app_usage_detail(
+    process_name: str,
+    days: int = 7,
+    auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME),
+):
+    """获取指定应用的详细使用数据（用于热力图）"""
+    if not check_auth(auth_token):
+        raise HTTPException(status_code=401, detail="未认证")
+
+    detail = app_usage.get_app_detail(process_name, days)
+    detail["app_name"] = get_app_name(process_name)
+
+    return detail
+
+
+@app.get("/api/usage/{date_str}")
+def get_usage_by_date(
+    date_str: str,
+    auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME),
+):
+    """获取指定日期的使用时间统计"""
+    if not check_auth(auth_token):
+        raise HTTPException(status_code=401, detail="未认证")
+
+    usage = app_usage.get_usage_by_date(date_str)
+
+    apps = []
+    for process_name, seconds in usage.items():
+        apps.append({
+            "process_name": process_name,
+            "app_name": get_app_name(process_name),
+            "seconds": seconds,
+            "formatted": app_usage.format_duration(seconds),
+        })
+
+    apps.sort(key=lambda x: x["seconds"], reverse=True)
+    total_seconds = sum(usage.values())
+
+    return {
+        "date": date_str,
+        "total_seconds": total_seconds,
+        "total_formatted": app_usage.format_duration(total_seconds),
+        "apps": apps,
+    }
 
 
 # ========== 移动设备 ==========

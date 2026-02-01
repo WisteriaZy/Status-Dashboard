@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据可视化 - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .usage-bar {
+            height: 24px;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        .view-btn.active {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .app-item {
+            cursor: pointer;
+            transition: background-color 0.15s;
+        }
+        .app-item:hover {
+            background-color: #f3f4f6;
+        }
+        .heatmap-tooltip {
+            position: fixed;
+            z-index: 100;
+            pointer-events: auto;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        .heatmap-tooltip.visible {
+            opacity: 1;
+        }
+        .heatmap-cell {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- 登录页 -->
+    <div id="login-page" class="min-h-screen flex items-center justify-center">
+        <div class="bg-white rounded-lg shadow-lg p-8 w-full max-w-sm">
+            <h1 class="text-2xl font-bold text-center mb-6">身份验证</h1>
+            <p class="text-gray-500 text-sm text-center mb-6">请输入验证器中的 6 位验证码</p>
+            <div class="space-y-4">
+                <input type="text" id="totp-code" maxlength="6" pattern="[0-9]*" inputmode="numeric"
+                    class="w-full text-center text-2xl tracking-widest py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    placeholder="000000" autocomplete="one-time-code">
+                <button onclick="submitTotp()" id="login-btn"
+                    class="w-full py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium">
+                    验证
+                </button>
+                <p id="login-error" class="text-red-500 text-sm text-center hidden"></p>
+            </div>
+            <p class="text-gray-400 text-xs text-center mt-6">首次使用请扫描 config/totp_qrcode.png</p>
+        </div>
+    </div>
+
+    <!-- 主页面 -->
+    <div id="main-page">
+        <!-- 顶部导航 -->
+        <nav class="bg-white shadow-sm">
+            <div class="max-w-6xl mx-auto px-4">
+                <div class="flex space-x-8">
+                    <a href="/" class="tab-btn py-4 px-1 font-medium text-gray-500 hover:text-blue-500">
+                        当前
+                    </a>
+                    <a href="/static/tasks.html" class="tab-btn py-4 px-1 font-medium text-gray-500 hover:text-blue-500">
+                        任务列表
+                    </a>
+                    <a href="/static/stats.html" class="tab-btn active py-4 px-1 font-medium text-gray-700 hover:text-blue-500">
+                        数据可视化
+                    </a>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 内容区域 -->
+        <main class="max-w-6xl mx-auto px-4 py-6 pb-16">
+            <!-- 视图切换 -->
+            <div class="bg-white rounded-lg shadow p-4 mb-4">
+                <div class="flex items-center gap-4 flex-wrap">
+                    <span class="text-sm text-gray-600">视图:</span>
+                    <div class="flex gap-2">
+                        <button onclick="switchView('day')" id="view-day" class="view-btn active px-4 py-1.5 text-sm rounded-lg border">
+                            单日
+                        </button>
+                        <button onclick="switchView('week')" id="view-week" class="view-btn px-4 py-1.5 text-sm rounded-lg border">
+                            本周
+                        </button>
+                        <button onclick="switchView('month')" id="view-month" class="view-btn px-4 py-1.5 text-sm rounded-lg border">
+                            本月
+                        </button>
+                    </div>
+                    <!-- 日期选择（仅单日视图） -->
+                    <div id="date-picker" class="flex items-center gap-2 ml-4">
+                        <label class="text-sm text-gray-600">日期:</label>
+                        <select id="date-select" onchange="loadDayData()" class="border rounded px-3 py-1.5 text-sm">
+                            <option value="">加载中...</option>
+                        </select>
+                    </div>
+                    <button onclick="refreshData()" class="text-sm text-gray-500 hover:text-blue-500 ml-auto">刷新</button>
+                </div>
+            </div>
+
+            <!-- 单日视图 -->
+            <div id="day-view">
+                <!-- 总计 -->
+                <div class="bg-white rounded-lg shadow p-6 mb-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-sm text-gray-500">总使用时间</div>
+                            <div id="total-time" class="text-3xl font-bold text-blue-600">--</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-sm text-gray-500">应用数量</div>
+                            <div id="app-count" class="text-2xl font-semibold">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 使用时间列表 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold mb-4">应用使用时间</h2>
+                    <div id="usage-list" class="space-y-3">
+                        <div class="text-gray-400 text-sm">加载中...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 周视图 -->
+            <div id="week-view" class="hidden">
+                <div class="bg-white rounded-lg shadow p-6 mb-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-sm text-gray-500">本周总使用时间</div>
+                            <div id="week-total-time" class="text-3xl font-bold text-blue-600">--</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-sm text-gray-500">日均</div>
+                            <div id="week-avg-time" class="text-2xl font-semibold">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6 mb-4">
+                    <h2 class="text-lg font-semibold mb-4">每日使用趋势</h2>
+                    <div id="week-daily-trend" class="flex items-end justify-between gap-2 h-40"></div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold mb-4">本周应用排行</h2>
+                    <div id="week-apps" class="space-y-3">
+                        <div class="text-gray-400 text-sm">加载中...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 月视图 -->
+            <div id="month-view" class="hidden">
+                <div class="bg-white rounded-lg shadow p-6 mb-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-sm text-gray-500">本月总使用时间</div>
+                            <div id="month-total-time" class="text-3xl font-bold text-blue-600">--</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-sm text-gray-500">日均</div>
+                            <div id="month-avg-time" class="text-2xl font-semibold">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6 mb-4">
+                    <h2 class="text-lg font-semibold mb-4">每日使用趋势（30天）</h2>
+                    <div id="month-daily-trend" class="flex items-end gap-1 h-40 overflow-x-auto"></div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold mb-4">本月应用排行</h2>
+                    <div id="month-apps" class="space-y-3">
+                        <div class="text-gray-400 text-sm">加载中...</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 底部状态栏 -->
+        <footer class="fixed bottom-0 left-0 right-0 bg-white border-t px-4 py-2">
+            <div class="max-w-6xl mx-auto flex justify-between text-sm text-gray-500">
+                <span id="connection-status">● 已连接</span>
+                <span id="last-update">--</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 悬浮热力图面板 -->
+    <div id="heatmap-tooltip" class="heatmap-tooltip bg-white rounded-lg shadow-lg p-3 border">
+        <div class="flex items-center gap-2 mb-2">
+            <div id="tooltip-color-dot" class="w-3 h-3 rounded-full"></div>
+            <span id="tooltip-app-name" class="text-sm font-medium"></span>
+            <span id="tooltip-total" class="text-xs text-gray-500 ml-auto"></span>
+        </div>
+        <div id="tooltip-heatmap" class="flex gap-0.5"></div>
+    </div>
+
+    <script src="/static/common.js"></script>
+    <script>
+        let currentView = 'day';
+        let availableDates = [];
+        let tooltipTimeout = null;
+        let currentAppItem = null;
+
+        const APP_COLORS = [
+            { name: 'blue', bg: 'bg-blue-500', light: ['bg-blue-100', 'bg-blue-200', 'bg-blue-400', 'bg-blue-500', 'bg-blue-700'] },
+            { name: 'green', bg: 'bg-green-500', light: ['bg-green-100', 'bg-green-200', 'bg-green-400', 'bg-green-500', 'bg-green-700'] },
+            { name: 'amber', bg: 'bg-amber-500', light: ['bg-amber-100', 'bg-amber-200', 'bg-amber-400', 'bg-amber-500', 'bg-amber-700'] },
+            { name: 'purple', bg: 'bg-purple-500', light: ['bg-purple-100', 'bg-purple-200', 'bg-purple-400', 'bg-purple-500', 'bg-purple-700'] },
+            { name: 'pink', bg: 'bg-pink-500', light: ['bg-pink-100', 'bg-pink-200', 'bg-pink-400', 'bg-pink-500', 'bg-pink-700'] },
+            { name: 'indigo', bg: 'bg-indigo-500', light: ['bg-indigo-100', 'bg-indigo-200', 'bg-indigo-400', 'bg-indigo-500', 'bg-indigo-700'] },
+            { name: 'red', bg: 'bg-red-500', light: ['bg-red-100', 'bg-red-200', 'bg-red-400', 'bg-red-500', 'bg-red-700'] },
+            { name: 'teal', bg: 'bg-teal-500', light: ['bg-teal-100', 'bg-teal-200', 'bg-teal-400', 'bg-teal-500', 'bg-teal-700'] },
+            { name: 'orange', bg: 'bg-orange-500', light: ['bg-orange-100', 'bg-orange-200', 'bg-orange-400', 'bg-orange-500', 'bg-orange-700'] },
+            { name: 'cyan', bg: 'bg-cyan-500', light: ['bg-cyan-100', 'bg-cyan-200', 'bg-cyan-400', 'bg-cyan-500', 'bg-cyan-700'] },
+        ];
+
+        function getAppColorIndex(processName) {
+            let hash = 0;
+            for (let i = 0; i < processName.length; i++) {
+                hash = ((hash << 5) - hash) + processName.charCodeAt(i);
+                hash = hash & hash;
+            }
+            return Math.abs(hash) % APP_COLORS.length;
+        }
+
+        function getAppColor(processName) {
+            return APP_COLORS[getAppColorIndex(processName)];
+        }
+
+        async function onAuthenticated() {
+            await loadAvailableDates();
+            await loadDayData();
+            document.getElementById('connection-status').innerHTML =
+                '<span class="text-green-500">●</span> 已连接';
+        }
+
+        function switchView(view) {
+            currentView = view;
+            document.getElementById('view-day').classList.toggle('active', view === 'day');
+            document.getElementById('view-week').classList.toggle('active', view === 'week');
+            document.getElementById('view-month').classList.toggle('active', view === 'month');
+            document.getElementById('day-view').classList.toggle('hidden', view !== 'day');
+            document.getElementById('week-view').classList.toggle('hidden', view !== 'week');
+            document.getElementById('month-view').classList.toggle('hidden', view !== 'month');
+            document.getElementById('date-picker').classList.toggle('hidden', view !== 'day');
+
+            if (view === 'week') loadWeekData();
+            else if (view === 'month') loadMonthData();
+        }
+
+        function refreshData() {
+            if (currentView === 'day') loadDayData();
+            else if (currentView === 'week') loadWeekData();
+            else loadMonthData();
+        }
+
+        async function loadAvailableDates() {
+            try {
+                const res = await fetch('/api/usage/dates');
+                if (handleUnauthorized(res)) return;
+                const data = await res.json();
+                availableDates = data.dates || [];
+
+                const select = document.getElementById('date-select');
+                select.innerHTML = '';
+                if (availableDates.length === 0) {
+                    select.innerHTML = '<option value="">暂无数据</option>';
+                    return;
+                }
+                availableDates.forEach((date, index) => {
+                    const option = document.createElement('option');
+                    option.value = date;
+                    option.textContent = formatDateLabel(date);
+                    if (index === 0) option.selected = true;
+                    select.appendChild(option);
+                });
+            } catch (e) {
+                console.error('加载日期列表失败', e);
+            }
+        }
+
+        function formatDateLabel(dateStr) {
+            const today = new Date().toISOString().slice(0, 10);
+            const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+            if (dateStr === today) return `今天 (${dateStr})`;
+            if (dateStr === yesterday) return `昨天 (${dateStr})`;
+            return dateStr;
+        }
+
+        async function loadDayData() {
+            const dateStr = document.getElementById('date-select').value;
+            if (!dateStr) return;
+
+            try {
+                const res = await fetch(`/api/usage/${dateStr}`);
+                if (handleUnauthorized(res)) return;
+                const data = await res.json();
+
+                document.getElementById('total-time').textContent = data.total_formatted || '0秒';
+                document.getElementById('app-count').textContent = data.apps.length;
+                renderAppList(data.apps, data.total_seconds, 'usage-list');
+                updateLastUpdate();
+            } catch (e) {
+                console.error('加载失败', e);
+                document.getElementById('usage-list').innerHTML = '<div class="text-red-500 text-sm">加载失败</div>';
+            }
+        }
+
+        async function loadWeekData() {
+            try {
+                const res = await fetch('/api/usage/week/summary');
+                if (handleUnauthorized(res)) return;
+                const data = await res.json();
+
+                document.getElementById('week-total-time').textContent = data.week_total_formatted || '0秒';
+                document.getElementById('week-avg-time').textContent = formatDuration(Math.round(data.week_total / 7));
+                renderDailyTrend(data.daily_totals, 'week-daily-trend');
+                renderAppList(data.apps, data.week_total, 'week-apps');
+                updateLastUpdate();
+            } catch (e) {
+                console.error('加载周数据失败', e);
+            }
+        }
+
+        async function loadMonthData() {
+            try {
+                const res = await fetch('/api/usage/month/summary');
+                if (handleUnauthorized(res)) return;
+                const data = await res.json();
+
+                document.getElementById('month-total-time').textContent = data.month_total_formatted || '0秒';
+                document.getElementById('month-avg-time').textContent = formatDuration(Math.round(data.month_total / 30));
+                renderDailyTrend(data.daily_totals, 'month-daily-trend', true);
+                renderAppList(data.apps, data.month_total, 'month-apps');
+                updateLastUpdate();
+            } catch (e) {
+                console.error('加载月数据失败', e);
+            }
+        }
+
+        function updateLastUpdate() {
+            document.getElementById('last-update').textContent = '更新于 ' + new Date().toLocaleTimeString();
+        }
+
+        function renderAppList(apps, totalSeconds, containerId) {
+            const container = document.getElementById(containerId);
+            if (apps.length === 0) {
+                container.innerHTML = '<div class="text-gray-400 text-sm text-center py-4">暂无使用记录</div>';
+                return;
+            }
+
+            const maxSeconds = apps[0]?.seconds || apps[0]?.total || 1;
+
+            const html = apps.map((app) => {
+                const seconds = app.seconds || app.total || 0;
+                const percent = (seconds / maxSeconds * 100).toFixed(1);
+                const timePercent = totalSeconds > 0 ? (seconds / totalSeconds * 100).toFixed(1) : 0;
+                const processName = app.process_name;
+                const appColor = getAppColor(processName);
+
+                return `
+                    <div class="app-item group rounded-lg p-2 -mx-2"
+                         data-process="${processName}"
+                         onmouseenter="showHeatmap(event, '${processName}')"
+                         onmouseleave="scheduleHideHeatmap()">
+                        <div class="flex items-center justify-between mb-1">
+                            <div class="flex items-center gap-2 flex-1 min-w-0">
+                                <div class="w-3 h-3 rounded-full flex-shrink-0 ${appColor.bg}"></div>
+                                <div class="font-medium text-sm truncate" title="${processName}">
+                                    ${app.app_name || processName}
+                                </div>
+                            </div>
+                            <div class="text-sm text-gray-600 ml-2 flex-shrink-0">
+                                ${app.formatted}
+                                <span class="text-xs text-gray-400">(${timePercent}%)</span>
+                            </div>
+                        </div>
+                        <div class="w-full bg-gray-100 rounded overflow-hidden">
+                            <div class="usage-bar ${appColor.bg}" style="width: ${percent}%"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        function renderDailyTrend(dailyTotals, containerId, compact = false) {
+            const container = document.getElementById(containerId);
+            const maxTotal = Math.max(...dailyTotals.map(d => d.total), 1);
+            const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+
+            const html = dailyTotals.map(day => {
+                const heightPercent = (day.total / maxTotal * 100).toFixed(1);
+                const date = new Date(day.date);
+                const weekday = weekdays[date.getDay()];
+                const isToday = day.date === new Date().toISOString().slice(0, 10);
+
+                if (compact) {
+                    return `
+                        <div class="flex flex-col items-center flex-shrink-0" style="width: 20px;">
+                            <div class="w-full flex justify-center mb-1 h-32">
+                                <div class="w-3 ${isToday ? 'bg-blue-500' : 'bg-gray-300'} rounded-t transition-all self-end"
+                                     style="height: ${Math.max(heightPercent, 2)}%"
+                                     title="${day.date}: ${day.formatted}"></div>
+                            </div>
+                            <div class="text-xs text-gray-400">${day.date.slice(8)}</div>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div class="flex-1 flex flex-col items-center">
+                        <div class="w-full flex justify-center mb-1 h-32">
+                            <div class="w-8 ${isToday ? 'bg-blue-500' : 'bg-gray-300'} rounded-t transition-all self-end"
+                                 style="height: ${Math.max(heightPercent, 2)}%"
+                                 title="${day.date}: ${day.formatted}"></div>
+                        </div>
+                        <div class="text-xs ${isToday ? 'text-blue-600 font-semibold' : 'text-gray-500'}">${weekday}</div>
+                        <div class="text-xs text-gray-400">${day.date.slice(5)}</div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        // 显示悬浮热力图
+        async function showHeatmap(event, processName) {
+            if (tooltipTimeout) {
+                clearTimeout(tooltipTimeout);
+                tooltipTimeout = null;
+            }
+
+            const tooltip = document.getElementById('heatmap-tooltip');
+            const appColor = getAppColor(processName);
+            currentAppItem = event.currentTarget;
+
+            // 定位到光标上方
+            const rect = currentAppItem.getBoundingClientRect();
+            tooltip.style.left = (rect.left + rect.width / 2) + 'px';
+            tooltip.style.top = (rect.top - 10) + 'px';
+
+            try {
+                const res = await fetch(`/api/usage/app/${encodeURIComponent(processName)}?days=30`);
+                if (!res.ok) return;
+                const data = await res.json();
+
+                document.getElementById('tooltip-color-dot').className = `w-3 h-3 rounded-full ${appColor.bg}`;
+                document.getElementById('tooltip-app-name').textContent = data.app_name || processName;
+                document.getElementById('tooltip-total').textContent = data.total_formatted;
+
+                // 渲染横向热力图
+                const maxSeconds = Math.max(...data.daily.map(d => d.total), 1);
+                const heatmapHtml = data.daily.map(day => {
+                    const level = getHeatmapLevel(day.total, maxSeconds);
+                    const bgColor = appColor.light[level];
+                    return `<div class="heatmap-cell ${bgColor}" title="${day.date}: ${day.formatted}"></div>`;
+                }).join('');
+
+                document.getElementById('tooltip-heatmap').innerHTML = heatmapHtml;
+
+                // 调整位置确保在视口内
+                tooltip.style.transform = 'translateX(-50%) translateY(-100%)';
+                tooltip.classList.add('visible');
+
+            } catch (e) {
+                console.error('加载热力图失败', e);
+            }
+        }
+
+        // 延迟隐藏热力图
+        function scheduleHideHeatmap() {
+            tooltipTimeout = setTimeout(() => {
+                hideHeatmap();
+            }, 100);
+        }
+
+        // 隐藏热力图
+        function hideHeatmap() {
+            const tooltip = document.getElementById('heatmap-tooltip');
+            tooltip.classList.remove('visible');
+            currentAppItem = null;
+        }
+
+        // 热力图面板的鼠标事件
+        document.getElementById('heatmap-tooltip').addEventListener('mouseenter', () => {
+            if (tooltipTimeout) {
+                clearTimeout(tooltipTimeout);
+                tooltipTimeout = null;
+            }
+        });
+
+        document.getElementById('heatmap-tooltip').addEventListener('mouseleave', () => {
+            hideHeatmap();
+        });
+
+        function getHeatmapLevel(seconds, maxSeconds) {
+            if (seconds === 0) return 0;
+            const ratio = seconds / maxSeconds;
+            if (ratio < 0.25) return 1;
+            if (ratio < 0.5) return 2;
+            if (ratio < 0.75) return 3;
+            return 4;
+        }
+
+        function formatDuration(seconds) {
+            if (seconds < 60) return seconds + '秒';
+            if (seconds < 3600) return Math.floor(seconds / 60) + '分钟';
+            const hours = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            return mins > 0 ? `${hours}小时${mins}分钟` : `${hours}小时`;
+        }
+
+        initApp();
+    </script>
+</body>
+</html>

@@ -26,6 +26,7 @@ config/totp_secret.txt
 config/totp_qrcode.png
 mcp_venv/
 Autoxjs/
+data/
 
 # Claude
 .claude/

@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务列表 - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/common.css">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- 登录页 -->
+    <div id="login-page" class="min-h-screen flex items-center justify-center">
+        <div class="bg-white rounded-lg shadow-lg p-8 w-full max-w-sm">
+            <h1 class="text-2xl font-bold text-center mb-6">身份验证</h1>
+            <p class="text-gray-500 text-sm text-center mb-6">请输入验证器中的 6 位验证码</p>
+            <div class="space-y-4">
+                <input type="text" id="totp-code" maxlength="6" pattern="[0-9]*" inputmode="numeric"
+                    class="w-full text-center text-2xl tracking-widest py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    placeholder="000000" autocomplete="one-time-code">
+                <button onclick="submitTotp()" id="login-btn"
+                    class="w-full py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium">
+                    验证
+                </button>
+                <p id="login-error" class="text-red-500 text-sm text-center hidden"></p>
+            </div>
+            <p class="text-gray-400 text-xs text-center mt-6">首次使用请扫描 config/totp_qrcode.png</p>
+        </div>
+    </div>
+
+    <!-- 主页面 -->
+    <div id="main-page">
+        <!-- 顶部导航 -->
+        <nav class="bg-white shadow-sm">
+            <div class="max-w-6xl mx-auto px-4">
+                <div class="flex space-x-8">
+                    <a href="/" class="tab-btn py-4 px-1 font-medium text-gray-500 hover:text-blue-500">
+                        当前
+                    </a>
+                    <a href="/static/tasks.html" class="tab-btn active py-4 px-1 font-medium text-gray-700 hover:text-blue-500">
+                        任务列表
+                    </a>
+                    <a href="/static/stats.html" class="tab-btn py-4 px-1 font-medium text-gray-500 hover:text-blue-500">
+                        数据可视化
+                    </a>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 内容区域 -->
+        <main class="max-w-6xl mx-auto px-4 py-6 pb-16">
+            <div class="space-y-4">
+                <!-- 添加任务 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex gap-2 mb-3">
+                        <input type="text" id="new-task-input" placeholder="添加新任务..."
+                            class="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                            onkeypress="if(event.key==='Enter')addTask()">
+                        <button onclick="toggleImportantInput()" id="important-btn" class="px-3 py-2 text-gray-400 hover:text-yellow-500 text-lg" title="标记重要">☆</button>
+                        <button onclick="addTask()" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm">
+                            添加
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-4 text-sm">
+                        <label class="flex items-center gap-1 text-gray-500">
+                            <input type="checkbox" id="show-completed" onchange="loadTasks()" class="rounded">
+                            显示已完成
+                        </label>
+                        <button onclick="loadTasks()" class="text-gray-500 hover:text-blue-500">刷新</button>
+                    </div>
+                </div>
+
+                <!-- 任务列表 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div id="tasks-container" class="text-gray-600">
+                        加载中...
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 底部状态栏 -->
+        <footer class="fixed bottom-0 left-0 right-0 bg-white border-t px-4 py-2">
+            <div class="max-w-6xl mx-auto flex justify-between text-sm text-gray-500">
+                <span id="connection-status">● 已连接</span>
+                <span id="last-update">最后更新: --</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/static/common.js"></script>
+    <script>
+        let newTaskImportant = false;
+
+        // 认证成功后的回调
+        function onAuthenticated() {
+            loadTasks();
+        }
+
+        function toggleImportantInput() {
+            newTaskImportant = !newTaskImportant;
+            const btn = document.getElementById('important-btn');
+            btn.textContent = newTaskImportant ? '★' : '☆';
+            btn.classList.toggle('text-yellow-500', newTaskImportant);
+            btn.classList.toggle('text-gray-400', !newTaskImportant);
+        }
+
+        async function loadTasks() {
+            const showCompleted = document.getElementById('show-completed')?.checked || false;
+            const container = document.getElementById('tasks-container');
+
+            try {
+                const res = await fetch(`/api/todo/tasks?include_completed=${showCompleted}`);
+                if (handleUnauthorized(res)) return;
+                const data = await res.json();
+
+                if (data.tasks.length === 0) {
+                    container.innerHTML = '<div class="text-gray-400 text-sm text-center py-4">没有待办任务</div>';
+                    document.getElementById('last-update').textContent = '最后更新: ' + new Date().toLocaleTimeString();
+                    return;
+                }
+
+                // 分离父任务和子任务
+                const parentTasks = data.tasks.filter(t => !t.parent_id);
+                const childTasks = data.tasks.filter(t => t.parent_id);
+
+                const tasksHtml = parentTasks.map(task => {
+                    const children = childTasks.filter(c => c.parent_id === task.id);
+                    return renderTask(task, children);
+                }).join('');
+
+                container.innerHTML = tasksHtml || '<div class="text-gray-400 text-sm text-center py-4">没有待办任务</div>';
+                document.getElementById('last-update').textContent = '最后更新: ' + new Date().toLocaleTimeString();
+            } catch (e) {
+                container.innerHTML = `<div class="text-red-500 text-sm">加载失败</div>`;
+            }
+        }
+
+        function renderTask(task, children = []) {
+            const importantStar = task.important ? '★' : '';
+            const completedClass = task.completed ? 'line-through text-gray-400' : '';
+            const checkIcon = task.completed ? '✓' : '';
+
+            let childrenHtml = '';
+            if (children.length > 0) {
+                childrenHtml = `<div class="ml-6 mt-2 space-y-1 border-l-2 border-gray-200 pl-3">
+                    ${children.map(c => renderTask(c, [])).join('')}
+                </div>`;
+            }
+
+            // 提醒信息摘要
+            const remindSummary = getRemindSummary(task);
+            const hasRemind = task.remind || task.remind_at;
+
+            return `
+                <div class="py-3 border-b last:border-0 group" data-task-id="${task.id}">
+                    <div class="flex items-start gap-3">
+                        <button onclick="completeTask('${task.id}')" class="mt-1 w-5 h-5 rounded-full border-2 ${task.completed ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 hover:border-green-500 hover:bg-green-50'} flex-shrink-0 transition-colors flex items-center justify-center text-xs" title="${task.completed ? '已完成' : '完成'}">${checkIcon}</button>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm ${completedClass}">
+                                ${importantStar ? `<span class="text-yellow-500 mr-1">${importantStar}</span>` : ''}
+                                ${task.title}
+                            </div>
+                            ${task.notes ? `<div class="text-xs text-gray-400 mt-1">${task.notes}</div>` : ''}
+                            ${remindSummary ? `<div class="text-xs text-blue-400 mt-1">🔔 ${remindSummary}</div>` : ''}
+                        </div>
+                        <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onclick="toggleRemindPanel('${task.id}')" class="text-gray-300 hover:text-blue-500 text-sm ${hasRemind ? 'text-blue-400' : ''}" title="设置提醒">🔔</button>
+                            <button onclick="toggleImportant('${task.id}')" class="text-gray-300 hover:text-yellow-500 text-sm" title="切换重要">★</button>
+                            <button onclick="promptAddSubtask('${task.id}')" class="text-gray-300 hover:text-blue-500 text-sm" title="添加子任务">+</button>
+                            <button onclick="deleteTask('${task.id}')" class="text-gray-300 hover:text-red-500 text-sm" title="删除">✕</button>
+                        </div>
+                    </div>
+                    <!-- 提醒设置面板 -->
+                    <div id="remind-panel-${task.id}" class="remind-panel mt-3 ml-8 p-3 bg-gray-50 rounded-lg text-sm">
+                        ${renderRemindPanel(task)}
+                    </div>
+                    ${childrenHtml}
+                </div>
+            `;
+        }
+
+        function getRemindSummary(task) {
+            // 兼容旧格式
+            if (task.remind_at && !task.remind) {
+                return new Date(task.remind_at).toLocaleString();
+            }
+
+            const remind = task.remind;
+            if (!remind) return '';
+
+            if (remind.type === 'once') {
+                return `一次性：${new Date(remind.at).toLocaleString()}`;
+            } else if (remind.type === 'daily') {
+                const hours = remind.hours || [];
+                return `每天 ${hours.map(h => h + ':00').join(', ')}`;
+            } else if (remind.type === 'weekly') {
+                const weekdayNames = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+                const days = (remind.weekdays || []).map(d => weekdayNames[d]).join(', ');
+                return `每周 ${days} ${remind.hour}:00`;
+            } else if (remind.type === 'monthly') {
+                const days = (remind.days || []).join(', ');
+                return `每月 ${days}日 ${remind.hour}:00`;
+            }
+            return '';
+        }
+
+        function renderRemindPanel(task) {
+            const remind = task.remind || {};
+            const remindType = remind.type || 'none';
+            const remindTag = task.remind_tag || '私人';
+
+            // 小时选择器
+            let hoursGrid = '<div class="hour-grid mt-2">';
+            for (let h = 0; h < 24; h++) {
+                const selected = (remind.hours || []).includes(h) ? 'selected' : '';
+                hoursGrid += `<button type="button" class="hour-btn ${selected}" data-hour="${h}">${h}</button>`;
+            }
+            hoursGrid += '</div>';
+
+            // 星期选择器
+            const weekdayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+            let weekdaysGrid = '<div class="flex gap-1 mt-2">';
+            for (let d = 1; d <= 7; d++) {
+                const selected = (remind.weekdays || []).includes(d) ? 'selected' : '';
+                weekdaysGrid += `<button type="button" class="weekday-btn ${selected}" data-weekday="${d}">${weekdayNames[d-1]}</button>`;
+            }
+            weekdaysGrid += '</div>';
+
+            // 日期选择器 (1-31)
+            let daysGrid = '<div class="day-grid mt-2">';
+            for (let d = 1; d <= 31; d++) {
+                const selected = (remind.days || []).includes(d) ? 'selected' : '';
+                daysGrid += `<button type="button" class="day-btn ${selected}" data-day="${d}">${d}</button>`;
+            }
+            daysGrid += '</div>';
+
+            // 小时下拉选择
+            let hourSelect = '<select class="remind-hour-select border rounded px-2 py-1 text-sm">';
+            for (let h = 0; h < 24; h++) {
+                const selected = remind.hour === h ? 'selected' : '';
+                hourSelect += `<option value="${h}" ${selected}>${h}:00</option>`;
+            }
+            hourSelect += '</select>';
+
+            // 一次性时间输入
+            const onceAt = remind.at || '';
+
+            return `
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-gray-600 mb-1">提醒类型</label>
+                        <select class="remind-type-select w-full border rounded px-2 py-1" onchange="onRemindTypeChange('${task.id}', this.value)">
+                            <option value="none" ${remindType === 'none' ? 'selected' : ''}>无提醒</option>
+                            <option value="once" ${remindType === 'once' ? 'selected' : ''}>一次性</option>
+                            <option value="daily" ${remindType === 'daily' ? 'selected' : ''}>每天</option>
+                            <option value="weekly" ${remindType === 'weekly' ? 'selected' : ''}>每周</option>
+                            <option value="monthly" ${remindType === 'monthly' ? 'selected' : ''}>每月</option>
+                        </select>
+                    </div>
+
+                    <!-- 一次性 -->
+                    <div class="remind-once-options ${remindType === 'once' ? '' : 'hidden'}">
+                        <label class="block text-gray-600 mb-1">提醒时间</label>
+                        <input type="datetime-local" class="remind-once-at w-full border rounded px-2 py-1" value="${onceAt ? onceAt.slice(0, 16) : ''}">
+                    </div>
+
+                    <!-- 每天 -->
+                    <div class="remind-daily-options ${remindType === 'daily' ? '' : 'hidden'}">
+                        <label class="block text-gray-600 mb-1">选择小时（可多选）</label>
+                        ${hoursGrid}
+                    </div>
+
+                    <!-- 每周 -->
+                    <div class="remind-weekly-options ${remindType === 'weekly' ? '' : 'hidden'}">
+                        <label class="block text-gray-600 mb-1">选择星期（可多选）</label>
+                        ${weekdaysGrid}
+                        <label class="block text-gray-600 mt-2 mb-1">提醒时间</label>
+                        ${hourSelect}
+                    </div>
+
+                    <!-- 每月 -->
+                    <div class="remind-monthly-options ${remindType === 'monthly' ? '' : 'hidden'}">
+                        <label class="block text-gray-600 mb-1">选择日期（可多选）</label>
+                        ${daysGrid}
+                        <label class="block text-gray-600 mt-2 mb-1">提醒时间</label>
+                        ${hourSelect}
+                    </div>
+
+                    <!-- 通知目标 -->
+                    <div>
+                        <label class="block text-gray-600 mb-1">通知目标</label>
+                        <select class="remind-tag-select w-full border rounded px-2 py-1">
+                            <option value="私人" ${remindTag === '私人' ? 'selected' : ''}>私人</option>
+                            <option value="公共" ${remindTag === '公共' ? 'selected' : ''}>公共</option>
+                        </select>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button onclick="saveRemind('${task.id}')" class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">保存</button>
+                        <button onclick="toggleRemindPanel('${task.id}')" class="px-3 py-1 bg-gray-200 text-gray-600 rounded hover:bg-gray-300 text-sm">取消</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleRemindPanel(taskId) {
+            const panel = document.getElementById(`remind-panel-${taskId}`);
+            if (panel) {
+                panel.classList.toggle('active');
+
+                // 绑定小时/星期/日期按钮点击事件
+                if (panel.classList.contains('active')) {
+                    panel.querySelectorAll('.hour-btn').forEach(btn => {
+                        btn.onclick = () => btn.classList.toggle('selected');
+                    });
+                    panel.querySelectorAll('.weekday-btn').forEach(btn => {
+                        btn.onclick = () => btn.classList.toggle('selected');
+                    });
+                    panel.querySelectorAll('.day-btn').forEach(btn => {
+                        btn.onclick = () => btn.classList.toggle('selected');
+                    });
+                }
+            }
+        }
+
+        function onRemindTypeChange(taskId, type) {
+            const panel = document.getElementById(`remind-panel-${taskId}`);
+            if (!panel) return;
+
+            // 隐藏所有选项
+            panel.querySelectorAll('.remind-once-options, .remind-daily-options, .remind-weekly-options, .remind-monthly-options').forEach(el => {
+                el.classList.add('hidden');
+            });
+
+            // 显示对应选项
+            if (type === 'once') {
+                panel.querySelector('.remind-once-options')?.classList.remove('hidden');
+            } else if (type === 'daily') {
+                panel.querySelector('.remind-daily-options')?.classList.remove('hidden');
+            } else if (type === 'weekly') {
+                panel.querySelector('.remind-weekly-options')?.classList.remove('hidden');
+            } else if (type === 'monthly') {
+                panel.querySelector('.remind-monthly-options')?.classList.remove('hidden');
+            }
+        }
+
+        async function saveRemind(taskId) {
+            const panel = document.getElementById(`remind-panel-${taskId}`);
+            if (!panel) return;
+
+            const type = panel.querySelector('.remind-type-select').value;
+            const remindTag = panel.querySelector('.remind-tag-select').value;
+
+            let remind = null;
+
+            if (type === 'once') {
+                const at = panel.querySelector('.remind-once-at').value;
+                if (at) {
+                    remind = { type: 'once', at: at };
+                }
+            } else if (type === 'daily') {
+                const hours = [];
+                panel.querySelectorAll('.hour-btn.selected').forEach(btn => {
+                    hours.push(parseInt(btn.dataset.hour));
+                });
+                if (hours.length > 0) {
+                    remind = { type: 'daily', hours: hours.sort((a, b) => a - b) };
+                }
+            } else if (type === 'weekly') {
+                const weekdays = [];
+                panel.querySelectorAll('.weekday-btn.selected').forEach(btn => {
+                    weekdays.push(parseInt(btn.dataset.weekday));
+                });
+                const hour = parseInt(panel.querySelector('.remind-hour-select').value);
+                if (weekdays.length > 0) {
+                    remind = { type: 'weekly', weekdays: weekdays.sort((a, b) => a - b), hour };
+                }
+            } else if (type === 'monthly') {
+                const days = [];
+                panel.querySelectorAll('.day-btn.selected').forEach(btn => {
+                    days.push(parseInt(btn.dataset.day));
+                });
+                const hour = parseInt(panel.querySelector('.remind-hour-select').value);
+                if (days.length > 0) {
+                    remind = { type: 'monthly', days: days.sort((a, b) => a - b), hour };
+                }
+            }
+
+            try {
+                await fetch(`/api/todo/tasks/${taskId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        remind: remind,
+                        remind_tag: remindTag,
+                    }),
+                });
+                await loadTasks();
+            } catch (e) {
+                console.error('保存提醒失败', e);
+            }
+        }
+
+        async function addTask(parentId = null) {
+            const input = document.getElementById('new-task-input');
+            const title = input.value.trim();
+            if (!title) return;
+
+            try {
+                await fetch('/api/todo/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title,
+                        important: newTaskImportant,
+                        parent_id: parentId,
+                    }),
+                });
+                input.value = '';
+                newTaskImportant = false;
+                document.getElementById('important-btn').textContent = '☆';
+                document.getElementById('important-btn').classList.remove('text-yellow-500');
+                document.getElementById('important-btn').classList.add('text-gray-400');
+                await loadTasks();
+            } catch {}
+        }
+
+        async function completeTask(taskId) {
+            try {
+                await fetch(`/api/todo/tasks/${taskId}/complete`, { method: 'POST' });
+                await loadTasks();
+            } catch {}
+        }
+
+        async function toggleImportant(taskId) {
+            try {
+                await fetch(`/api/todo/tasks/${taskId}/toggle-important`, { method: 'POST' });
+                await loadTasks();
+            } catch {}
+        }
+
+        async function deleteTask(taskId) {
+            try {
+                await fetch(`/api/todo/tasks/${taskId}`, { method: 'DELETE' });
+                await loadTasks();
+            } catch {}
+        }
+
+        function promptAddSubtask(parentId) {
+            const title = prompt('子任务标题:');
+            if (title && title.trim()) {
+                fetch('/api/todo/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: title.trim(),
+                        parent_id: parentId,
+                    }),
+                }).then(() => loadTasks());
+            }
+        }
+
+        // 启动应用
+        initApp();
+    </script>
+</body>
+</html>
