@@ -1,6 +1,7 @@
 """
 Local Device Status Dashboard - Backend
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Cookie, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -14,10 +15,20 @@ from device_info import get_device_info, format_uptime
 from screenshot import take_screenshot
 from media_info import get_media_info
 from auth import verify_totp, generate_device_token, register_verified_token, is_token_valid, TOKEN_VALID_DAYS
-import google_tasks
+import local_todo
 import mobile_device
 
-app = FastAPI(title="Local Device Status Dashboard", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时：启动提醒检查器
+    local_todo.start_reminder_checker()
+    yield
+    # 关闭时：停止提醒检查器
+    local_todo.stop_reminder_checker()
+
+
+app = FastAPI(title="Local Device Status Dashboard", version="0.1.0", lifespan=lifespan)
 
 # 允许前端跨域访问（本地开发用）
 app.add_middleware(
@@ -46,8 +57,19 @@ class VerifyRequest(BaseModel):
 
 class AddTaskRequest(BaseModel):
     title: str
+    parent_id: Optional[str] = None
+    important: bool = False
+    remind: Optional[dict] = None
+    remind_tag: Optional[str] = None
     notes: str = ""
-    tasklist_id: str = "@default"
+
+
+class UpdateTaskRequest(BaseModel):
+    title: Optional[str] = None
+    notes: Optional[str] = None
+    important: Optional[bool] = None
+    remind: Optional[dict] = None
+    remind_tag: Optional[str] = None
 
 
 class DeviceUpdateRequest(BaseModel):
@@ -188,64 +210,18 @@ def get_devices(auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME)
     return {"devices": mobile_device.get_devices()}
 
 
-# ========== Google Tasks ==========
-
-@app.get("/api/todo/connect")
-def todo_connect(auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME)):
-    """发起 Google OAuth 授权"""
-    if not check_auth(auth_token):
-        raise HTTPException(status_code=401, detail="未认证")
-
-    url = google_tasks.get_auth_url()
-    return RedirectResponse(url)
-
-
-@app.get("/api/todo/callback")
-def todo_callback(code: str = "", error: str = ""):
-    """Google OAuth 回调"""
-    if error:
-        return FileResponse(FRONTEND_DIR / "index.html")
-
-    if code:
-        google_tasks.handle_callback(code)
-
-    return RedirectResponse("/")
-
-
-@app.get("/api/todo/status")
-def todo_status(auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME)):
-    """检查 Google Tasks 连接状态"""
-    if not check_auth(auth_token):
-        raise HTTPException(status_code=401, detail="未认证")
-
-    return {"connected": google_tasks.is_connected()}
-
-
-@app.get("/api/todo/lists")
-def todo_lists(auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME)):
-    """获取所有任务列表"""
-    if not check_auth(auth_token):
-        raise HTTPException(status_code=401, detail="未认证")
-
-    if not google_tasks.is_connected():
-        raise HTTPException(status_code=400, detail="未连接 Google Tasks")
-
-    return {"lists": google_tasks.get_task_lists()}
-
+# ========== 本地 TODO ==========
 
 @app.get("/api/todo/tasks")
 def todo_tasks(
-    tasklist_id: str = "@default",
+    include_completed: bool = False,
     auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME),
 ):
-    """获取任务列表"""
+    """获取所有 TODO"""
     if not check_auth(auth_token):
         raise HTTPException(status_code=401, detail="未认证")
 
-    if not google_tasks.is_connected():
-        raise HTTPException(status_code=400, detail="未连接 Google Tasks")
-
-    return {"tasks": google_tasks.get_tasks(tasklist_id)}
+    return {"tasks": local_todo.get_todos(include_completed)}
 
 
 @app.post("/api/todo/tasks")
@@ -253,51 +229,101 @@ def todo_add_task(
     req: AddTaskRequest,
     auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME),
 ):
-    """添加任务"""
+    """添加 TODO"""
     if not check_auth(auth_token):
         raise HTTPException(status_code=401, detail="未认证")
 
-    if not google_tasks.is_connected():
-        raise HTTPException(status_code=400, detail="未连接 Google Tasks")
+    todo = local_todo.add_todo(
+        title=req.title,
+        parent_id=req.parent_id,
+        important=req.important,
+        remind=req.remind,
+        remind_tag=req.remind_tag,
+        notes=req.notes,
+    )
+    return {"task": todo}
 
-    result = google_tasks.add_task(req.title, req.notes, req.tasklist_id)
-    if not result:
-        raise HTTPException(status_code=500, detail="添加失败")
 
-    return {"task": result}
+@app.get("/api/todo/tasks/{task_id}")
+def todo_get_task(
+    task_id: str,
+    auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME),
+):
+    """获取单个 TODO"""
+    if not check_auth(auth_token):
+        raise HTTPException(status_code=401, detail="未认证")
+
+    todo = local_todo.get_todo(task_id)
+    if not todo:
+        raise HTTPException(status_code=404, detail="TODO 不存在")
+
+    return {"task": todo}
+
+
+@app.patch("/api/todo/tasks/{task_id}")
+def todo_update_task(
+    task_id: str,
+    req: UpdateTaskRequest,
+    auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME),
+):
+    """更新 TODO"""
+    if not check_auth(auth_token):
+        raise HTTPException(status_code=401, detail="未认证")
+
+    updates = req.dict(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="无更新内容")
+
+    todo = local_todo.update_todo(task_id, **updates)
+    if not todo:
+        raise HTTPException(status_code=404, detail="TODO 不存在")
+
+    return {"task": todo}
 
 
 @app.post("/api/todo/tasks/{task_id}/complete")
 def todo_complete_task(
     task_id: str,
-    tasklist_id: str = "@default",
     auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME),
 ):
-    """完成任务"""
+    """完成 TODO"""
     if not check_auth(auth_token):
         raise HTTPException(status_code=401, detail="未认证")
 
-    if not google_tasks.is_connected():
-        raise HTTPException(status_code=400, detail="未连接 Google Tasks")
+    if not local_todo.complete_todo(task_id):
+        raise HTTPException(status_code=404, detail="TODO 不存在")
 
-    google_tasks.complete_task(task_id, tasklist_id)
     return {"success": True}
+
+
+@app.post("/api/todo/tasks/{task_id}/toggle-important")
+def todo_toggle_important(
+    task_id: str,
+    auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME),
+):
+    """切换重要状态"""
+    if not check_auth(auth_token):
+        raise HTTPException(status_code=401, detail="未认证")
+
+    todo = local_todo.toggle_important(task_id)
+    if not todo:
+        raise HTTPException(status_code=404, detail="TODO 不存在")
+
+    return {"task": todo}
 
 
 @app.delete("/api/todo/tasks/{task_id}")
 def todo_delete_task(
     task_id: str,
-    tasklist_id: str = "@default",
     auth_token: Optional[str] = Cookie(None, alias=AUTH_COOKIE_NAME),
 ):
-    """删除任务"""
+    """删除 TODO"""
     if not check_auth(auth_token):
         raise HTTPException(status_code=401, detail="未认证")
 
-    if not google_tasks.is_connected():
-        raise HTTPException(status_code=400, detail="未连接 Google Tasks")
+    if not local_todo.delete_todo(task_id):
+        raise HTTPException(status_code=404, detail="TODO 不存在")
 
-    google_tasks.delete_task(task_id, tasklist_id)
     return {"success": True}
 
 

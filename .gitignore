@@ -22,6 +22,7 @@ Thumbs.db
 *.sqlite
 screenshots/
 config/
+mcp_venv/
 
 # Claude
 .claude/
