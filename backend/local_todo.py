@@ -8,6 +8,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, List
 
+import config
+
 # Windows 通知 (优先使用 winotify，备选 win10toast)
 NOTIFY_BACKEND = None
 try:
@@ -367,8 +369,8 @@ def _reminder_loop():
             print(f"[REMIND] 检查提醒出错: {e}")
             traceback.print_exc()
 
-        # 每 30 秒检查一次
-        time.sleep(30)
+        # 从配置读取检查间隔
+        time.sleep(config.reminder.check_interval)
 
     print("[REMIND] 提醒循环线程已退出")
 

@@ -9,19 +9,27 @@ from datetime import datetime, timedelta
 import pyotp
 import qrcode
 
+import config
+
 
 # 配置
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 SECRET_FILE = CONFIG_DIR / "totp_secret.txt"
 QR_CODE_FILE = CONFIG_DIR / "totp_qrcode.png"
-APP_NAME = "LocalDashboard"
+
+# 从配置读取
+def _get_app_name() -> str:
+    return config.auth.app_name
+
+def _get_token_valid_days() -> int:
+    return config.auth.token_valid_days
+
+# 导出供其他模块使用（兼容旧代码）
+TOKEN_VALID_DAYS = 7  # 默认值，实际使用 _get_token_valid_days()
 
 # 已验证设备的 token 存储（内存中，重启后失效需重新验证）
 # 格式: {token_hash: expire_time}
 _verified_tokens: dict[str, datetime] = {}
-
-# Token 有效期（天）
-TOKEN_VALID_DAYS = 7
 
 
 def _ensure_config_dir():
@@ -42,7 +50,7 @@ def get_or_create_secret() -> str:
 
     # 生成二维码
     totp = pyotp.TOTP(secret)
-    uri = totp.provisioning_uri(name="local", issuer_name=APP_NAME)
+    uri = totp.provisioning_uri(name="local", issuer_name=_get_app_name())
 
     qr = qrcode.make(uri)
     qr.save(QR_CODE_FILE)
@@ -74,7 +82,7 @@ def hash_token(token: str) -> str:
 def register_verified_token(token: str):
     """注册已验证的 token"""
     token_hash = hash_token(token)
-    expire_time = datetime.now() + timedelta(days=TOKEN_VALID_DAYS)
+    expire_time = datetime.now() + timedelta(days=_get_token_valid_days())
     _verified_tokens[token_hash] = expire_time
 
 

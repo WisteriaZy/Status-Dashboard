@@ -1,11 +1,28 @@
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
+# Local Device Status Dashboard - 主服务依赖
+
+# Web 框架
+fastapi>=0.95.0,<0.100.0
+uvicorn[standard]>=0.22.0,<0.24.0
+
+# 系统信息
 psutil>=5.9.0
 pywin32>=306
+
+# Windows 通知
+winotify>=1.1.0
+
+# 截图
 Pillow>=10.0.0
+
+# 媒体信息
 winsdk>=1.0.0b10
+
+# 认证
 pyotp>=2.9.0
 qrcode[pil]>=7.0
-google-auth>=2.0.0
-google-auth-oauthlib>=1.0.0
-google-api-python-client>=2.0.0
+
+# QQ 通知
+websockets>=12.0
+
+# 配置
+pyyaml>=6.0

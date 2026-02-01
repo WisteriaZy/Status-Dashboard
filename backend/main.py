@@ -340,5 +340,6 @@ def serve_index():
 
 if __name__ == "__main__":
     import uvicorn
+    import config
 
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("main:app", host=config.server.host, port=config.server.port, reload=True)

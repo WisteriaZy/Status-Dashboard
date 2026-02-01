@@ -6,15 +6,17 @@ import asyncio
 import sys
 from typing import Optional
 
-# NapCat 配置
-WS_URL = "ws://100.86.239.69:6200"
-TOKEN = "1608900366"
+import config
 
-# Tag -> 发送目标映射
-NOTIFY_TARGETS = {
-    "私人": {"type": "private", "id": 1608900366},
-    # "公共": {"type": "group", "id": 123456789},  # 待补充
-}
+# 从配置文件读取
+def _get_ws_url() -> str:
+    return config.qq_notify.ws_url
+
+def _get_token() -> str:
+    return config.qq_notify.token
+
+def _get_targets() -> dict:
+    return config.qq_notify.targets
 
 
 async def _send_message(target_type: str, target_id: int, message: str) -> bool:
@@ -22,9 +24,12 @@ async def _send_message(target_type: str, target_id: int, message: str) -> bool:
     try:
         import websockets
 
+        ws_url = _get_ws_url()
+        token = _get_token()
+
         async with websockets.connect(
-            WS_URL,
-            extra_headers={"Authorization": f"Bearer {TOKEN}"} if TOKEN else None,
+            ws_url,
+            extra_headers={"Authorization": f"Bearer {token}"} if token else None,
         ) as ws:
             # 短暂等待并丢弃连接后的 lifecycle 事件
             try:
@@ -98,7 +103,8 @@ def send_notify(tag: str, message: str) -> bool:
     Returns:
         是否发送成功
     """
-    target = NOTIFY_TARGETS.get(tag)
+    targets = _get_targets()
+    target = targets.get(tag)
     if not target:
         print(f"[QQ] 未知 tag: {tag}")
         return False

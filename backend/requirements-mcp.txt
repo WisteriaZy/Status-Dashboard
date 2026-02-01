@@ -1,0 +1,5 @@
+# MCP Server 依赖
+# 使用独立虚拟环境 (mcp_venv)
+
+mcp[cli]>=1.26.0
+pyyaml>=6.0

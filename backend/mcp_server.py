@@ -2,25 +2,30 @@
 MCP Server for Dashboard TODO 系统
 让 AstrBot 的 LLM 通过 MCP 协议来管理任务
 
-使用 Streamable HTTP 传输模式，监听端口 8001
+使用 Streamable HTTP 传输模式
 """
 
 from mcp.server.fastmcp import FastMCP
 from typing import Optional
 import local_todo
 
+# 注意：MCP Server 在独立虚拟环境运行，无法使用 config 模块
+# 端口配置需要手动同步
+MCP_HOST = "0.0.0.0"
+MCP_PORT = 8002
+
 # 创建 MCP Server
 mcp = FastMCP(
     name="dashboard-todo",
     instructions="Dashboard TODO 任务管理。可以创建、查看、完成、删除任务，支持设置提醒。",
-    host="0.0.0.0",
-    port=8002,
+    host=MCP_HOST,
+    port=MCP_PORT,
     stateless_http=True,
 )
 
 
 @mcp.tool()
-def list_tasks(include_completed: bool = False) -> list[dict]:
+def list_tasks(include_completed: bool = False) -> dict:
     """
     列出所有任务
 
@@ -28,9 +33,17 @@ def list_tasks(include_completed: bool = False) -> list[dict]:
         include_completed: 是否包含已完成的任务，默认 False
 
     Returns:
-        任务列表，每个任务包含 id, title, notes, completed, important, remind 等字段
+        包含任务列表的字典，tasks 字段为任务数组
     """
     todos = local_todo.get_todos(include_completed=include_completed)
+
+    if not todos:
+        return {
+            "message": "当前没有任务" if not include_completed else "没有任何任务",
+            "tasks": [],
+            "count": 0
+        }
+
     # 简化返回，只保留关键字段
     result = []
     for t in todos:
@@ -44,7 +57,11 @@ def list_tasks(include_completed: bool = False) -> list[dict]:
             "remind_tag": t.get("remind_tag"),
             "created_at": t.get("created_at"),
         })
-    return result
+
+    return {
+        "tasks": result,
+        "count": len(result)
+    }
 
 
 @mcp.tool()
@@ -186,9 +203,9 @@ if __name__ == "__main__":
     print("=" * 50)
     print("Dashboard TODO MCP Server")
     print("=" * 50)
-    print("传输模式: Streamable HTTP")
-    print("端口: 8002")
-    print("MCP 端点: http://localhost:8002/mcp")
+    print("传输模式: Streamable HTTP (stateless)")
+    print(f"端口: {MCP_PORT}")
+    print(f"MCP 端点: http://localhost:{MCP_PORT}/mcp")
     print("=" * 50)
 
     # 使用 streamable-http 模式启动

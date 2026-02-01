@@ -21,8 +21,11 @@ Thumbs.db
 *.db
 *.sqlite
 screenshots/
-config/
+config/device_secret.txt
+config/totp_secret.txt
+config/totp_qrcode.png
 mcp_venv/
+Autoxjs/
 
 # Claude
 .claude/

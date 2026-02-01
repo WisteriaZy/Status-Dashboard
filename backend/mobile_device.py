@@ -6,6 +6,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
 
+import config
+
 # 配置
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 SECRET_FILE = CONFIG_DIR / "device_secret.txt"
@@ -14,8 +16,9 @@ SECRET_FILE = CONFIG_DIR / "device_secret.txt"
 # 格式: {device_id: {show_name, using, app_name, battery, charging, last_update}}
 _devices: dict[str, dict] = {}
 
-# 设备超时时间（秒），超过此时间视为离线
-DEVICE_TIMEOUT = 60
+# 从配置读取
+def _get_timeout() -> int:
+    return config.mobile_device.timeout_seconds
 
 
 def _ensure_config_dir():
@@ -65,11 +68,12 @@ def get_devices() -> list:
     """获取所有设备状态"""
     now = datetime.now()
     result = []
+    timeout = _get_timeout()
 
     for device_id, info in _devices.items():
         # 检查是否超时
         elapsed = (now - info["last_update"]).total_seconds()
-        online = elapsed < DEVICE_TIMEOUT
+        online = elapsed < timeout
 
         result.append({
             "id": device_id,
@@ -93,7 +97,7 @@ def get_device(device_id: str) -> Optional[dict]:
     info = _devices[device_id]
     now = datetime.now()
     elapsed = (now - info["last_update"]).total_seconds()
-    online = elapsed < DEVICE_TIMEOUT
+    online = elapsed < _get_timeout()
 
     return {
         "id": device_id,
