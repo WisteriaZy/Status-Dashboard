@@ -1,5 +1,12 @@
 // 公共认证和工具函数
 
+// 注册 Service Worker
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/sw.js')
+        .then(() => console.log('[SW] 注册成功'))
+        .catch((err) => console.log('[SW] 注册失败', err));
+}
+
 // 检查认证状态
 async function checkAuth() {
     try {
